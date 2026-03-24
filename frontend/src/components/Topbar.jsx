@@ -91,8 +91,8 @@ export default function Topbar({ onMenuToggle }) {
   const searchRef = useRef(null);
 
   useEffect(() => {
-    client.get('/schedule').then(res => {
-      setOverdueTasks(res.data.filter(t => t.status === 'Overdue'));
+    client.get('/schedule', { params: { limit: 1000 } }).then(res => {
+      setOverdueTasks((res.data.data ?? []).filter(t => t.status === 'Overdue'));
     }).catch(() => {});
   }, [location.pathname]);
 
