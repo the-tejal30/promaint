@@ -2,6 +2,9 @@
 
 A full-stack web application for managing preventive maintenance schedules, equipment tracking, work orders, and technicians.
 
+**Live App:** https://promaint.vercel.app
+**Backend API:** https://promaint-backend.onrender.com/api/health
+
 ---
 
 ## Tech Stack
