@@ -46,7 +46,7 @@ export default function WorkOrders() {
       client.get('/technicians')
     ]).then(([wo, eq, t]) => {
       setWorkOrders(wo.data);
-      setEquipment(eq.data);
+      setEquipment(eq.data.data ?? []);
       setTechnicians(t.data);
     }).catch(() => toast('Failed to load work orders', 'error'))
       .finally(() => setLoading(false));

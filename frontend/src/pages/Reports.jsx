@@ -53,14 +53,14 @@ export default function Reports() {
     setReportData(null);
     try {
       const [schedule, equipment, workOrders, technicians] = await Promise.all([
-        client.get('/schedule'),
-        client.get('/equipment'),
+        client.get('/schedule', { params: { limit: 10000 } }),
+        client.get('/equipment', { params: { limit: 10000 } }),
         client.get('/workorders'),
         client.get('/technicians'),
       ]);
 
-      const s = schedule.data;
-      const e = equipment.data;
+      const s = schedule.data.data ?? [];
+      const e = equipment.data.data ?? [];
       const w = workOrders.data;
       const t = technicians.data;
 
