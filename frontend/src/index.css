@@ -1454,3 +1454,16 @@ body {
   .kpi-grid { grid-template-columns: 1fr; }
   .page { padding: 16px; }
 }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+.pagination-info {
+  font-size: 0.82rem;
+  color: var(--text3);
+}

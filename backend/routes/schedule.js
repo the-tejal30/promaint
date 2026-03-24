@@ -18,10 +18,25 @@ function computeStatus(nextDue) {
   return 'Scheduled';
 }
 
-router.get('/', async (_req, res) => {
-  const schedule = await Schedule.find({}, '-_id -__v');
-  const result = schedule.map(t => ({ ...t.toObject(), status: computeStatus(t.nextDue) }));
-  res.json(result);
+router.get('/', async (req, res) => {
+  const { page = 1, limit = 50, search, frequency } = req.query;
+  const filter = {};
+  if (search) {
+    filter.$or = [
+      { id:            { $regex: search, $options: 'i' } },
+      { equipmentName: { $regex: search, $options: 'i' } },
+      { description:   { $regex: search, $options: 'i' } }
+    ];
+  }
+  if (frequency) filter.frequency = frequency;
+
+  const skip = (Number(page) - 1) * Number(limit);
+  const [tasks, total] = await Promise.all([
+    Schedule.find(filter, '-_id -__v').skip(skip).limit(Number(limit)),
+    Schedule.countDocuments(filter)
+  ]);
+  const data = tasks.map(t => ({ ...t.toObject(), status: computeStatus(t.nextDue) }));
+  res.json({ data, total, page: Number(page), limit: Number(limit) });
 });
 
 router.post('/', authenticate, async (req, res) => {

@@ -4,9 +4,28 @@ import { authenticate, requireAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
-router.get('/', async (_req, res) => {
-  const equipment = await Equipment.find({}, '-_id -__v');
-  res.json(equipment);
+router.get('/', async (req, res) => {
+  const { page = 1, limit = 50, search, status, frequency, pair } = req.query;
+  const filter = {};
+  if (search) {
+    filter.$or = [
+      { assetCode: { $regex: search, $options: 'i' } },
+      { assetType: { $regex: search, $options: 'i' } },
+      { area:      { $regex: search, $options: 'i' } },
+      { zone:      { $regex: search, $options: 'i' } },
+      { pair:      { $regex: search, $options: 'i' } }
+    ];
+  }
+  if (status)    filter.status    = status;
+  if (frequency) filter.frequency = frequency;
+  if (pair)      filter.pair      = pair;
+
+  const skip = (Number(page) - 1) * Number(limit);
+  const [data, total] = await Promise.all([
+    Equipment.find(filter, '-_id -__v').skip(skip).limit(Number(limit)),
+    Equipment.countDocuments(filter)
+  ]);
+  res.json({ data, total, page: Number(page), limit: Number(limit) });
 });
 
 router.post('/', authenticate, requireAdmin, async (req, res) => {

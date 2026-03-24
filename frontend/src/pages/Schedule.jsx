@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import client from '../api/client.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { useToast } from '../components/Toast.jsx';
@@ -10,12 +10,14 @@ import TrashIcon from '../icons/TrashIcon.jsx';
 import CheckIcon from '../icons/CheckIcon.jsx';
 import SearchIcon from '../icons/SearchIcon.jsx';
 
+const LIMIT = 50;
+
 const emptyForm = {
   equipmentId: '', equipmentName: '', description: '', frequency: 'Monthly',
   lastDone: '', nextDue: '', assignedTo: '', assignedName: '', priority: 'Medium', estimatedHours: 1
 };
 
-const frequencies = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annually'];
+const frequencies = ['Daily', 'Weekly', 'Monthly', 'Bi Monthly', 'Quarterly', 'Half Yearly', 'Annually'];
 const priorities = ['Critical', 'High', 'Medium', 'Low'];
 
 function formatDate(d) {
@@ -27,7 +29,9 @@ function formatDate(d) {
 
 export default function Schedule() {
   const [tasks, setTasks] = useState([]);
-  const [equipment, setEquipment] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [overdueCount, setOverdueCount] = useState(0);
+  const [page, setPage] = useState(1);
   const [technicians, setTechnicians] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -39,48 +43,43 @@ export default function Schedule() {
   const [saving, setSaving] = useState(false);
   const { isAdmin } = useAuth();
   const toast = useToast();
+  const searchTimer = useRef(null);
 
-  const fetchAll = useCallback(() => {
+  const fetchTasks = useCallback((pg = 1, q = search, freq = filterFreq) => {
     setLoading(true);
-    Promise.all([
-      client.get('/schedule'),
-      client.get('/equipment'),
-      client.get('/technicians')
-    ]).then(([s, e, t]) => {
-      setTasks(s.data);
-      setEquipment(e.data);
-      setTechnicians(t.data);
-    }).catch(() => toast('Failed to load schedule', 'error'))
+    const params = { page: pg, limit: LIMIT };
+    if (q)    params.search    = q;
+    if (freq) params.frequency = freq;
+    client.get('/schedule', { params })
+      .then(res => {
+        setTasks(res.data.data);
+        setTotal(res.data.total);
+        setPage(pg);
+        setOverdueCount(res.data.data.filter(t => t.status === 'Overdue').length);
+      })
+      .catch(() => toast('Failed to load schedule', 'error'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [search, filterFreq]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    fetchTasks(1);
+    client.get('/technicians').then(r => setTechnicians(r.data)).catch(() => {});
+  }, [filterFreq]);
 
-  const filtered = tasks.filter(t => {
-    const q = search.toLowerCase();
-    const matchSearch = !q || t.description?.toLowerCase().includes(q) || t.equipmentName?.toLowerCase().includes(q) || t.id?.toLowerCase().includes(q);
-    const matchFreq = !filterFreq || t.frequency === filterFreq;
-    return matchSearch && matchFreq;
-  });
-
-  const openAdd = () => {
-    setEditItem(null);
-    setForm(emptyForm);
-    setModalOpen(true);
+  const handleSearchChange = (val) => {
+    setSearch(val);
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => fetchTasks(1, val, filterFreq), 400);
   };
 
-  const openEdit = (item) => {
-    setEditItem(item);
-    setForm({ ...item });
-    setModalOpen(true);
-  };
+  const totalPages = Math.ceil(total / LIMIT);
+
+  const openAdd = () => { setEditItem(null); setForm(emptyForm); setModalOpen(true); };
+  const openEdit = (item) => { setEditItem(item); setForm({ ...item }); setModalOpen(true); };
 
   const handleFormChange = (e) => {
     const { name, value } = e.target;
-    if (name === 'equipmentId') {
-      const eq = equipment.find(e => e.id === value);
-      setForm(f => ({ ...f, equipmentId: value, equipmentName: eq?.name || value }));
-    } else if (name === 'assignedTo') {
+    if (name === 'assignedTo') {
       const tech = technicians.find(t => t.id === value);
       setForm(f => ({ ...f, assignedTo: value, assignedName: tech?.name || value }));
     } else {
@@ -100,7 +99,7 @@ export default function Schedule() {
         toast('PM task added', 'success');
       }
       setModalOpen(false);
-      fetchAll();
+      fetchTasks(page);
     } catch (err) {
       toast(err.response?.data?.error || 'Failed to save task', 'error');
     } finally {
@@ -112,7 +111,7 @@ export default function Schedule() {
     try {
       await client.patch(`/schedule/${task.id}/done`);
       toast(`${task.id} marked as complete`, 'success');
-      fetchAll();
+      fetchTasks(page);
     } catch (err) {
       toast(err.response?.data?.error || 'Failed to update task', 'error');
     }
@@ -123,7 +122,7 @@ export default function Schedule() {
       await client.delete(`/schedule/${id}`);
       toast('Task deleted', 'success');
       setDeleteConfirm(null);
-      fetchAll();
+      fetchTasks(page);
     } catch (err) {
       toast(err.response?.data?.error || 'Failed to delete', 'error');
     }
@@ -134,7 +133,7 @@ export default function Schedule() {
       <div className="page-header">
         <div>
           <div className="page-title">PM Schedule</div>
-          <div className="page-subtitle">{tasks.filter(t => t.status === 'Overdue').length} overdue tasks</div>
+          <div className="page-subtitle">{overdueCount} overdue on this page · {total} total tasks</div>
         </div>
         {isAdmin && (
           <button className="btn btn-primary" onClick={openAdd}>
@@ -151,7 +150,7 @@ export default function Schedule() {
             type="text"
             placeholder="Search tasks..."
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => handleSearchChange(e.target.value)}
           />
         </div>
         <select className="filter-select" value={filterFreq} onChange={e => setFilterFreq(e.target.value)}>
@@ -159,13 +158,13 @@ export default function Schedule() {
           {frequencies.map(f => <option key={f} value={f}>{f}</option>)}
         </select>
         <span className="toolbar-spacer" />
-        <span style={{ fontSize: '0.8rem', color: 'var(--text3)' }}>{filtered.length} results</span>
+        <span style={{ fontSize: '0.8rem', color: 'var(--text3)' }}>{total} results</span>
       </div>
 
       <div className="panel">
         {loading ? (
           <div className="loading-state"><div className="spinner" /><span>Loading...</span></div>
-        ) : filtered.length === 0 ? (
+        ) : tasks.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon" style={{ display: 'flex', justifyContent: 'center' }}>
               <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.3 }}>
@@ -176,74 +175,80 @@ export default function Schedule() {
             <p>No tasks match your current filters.</p>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Task ID</th>
-                  <th>Equipment</th>
-                  <th>Description</th>
-                  <th>Frequency</th>
-                  <th>Last Done</th>
-                  <th>Next Due</th>
-                  <th>Assigned To</th>
-                  <th>Priority</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(task => (
-                  <tr key={task.id} className={task.status === 'Overdue' ? 'row-overdue' : ''}>
-                    <td className="mono">{task.id}</td>
-                    <td style={{ color: 'var(--text)', fontWeight: 500 }}>{task.equipmentName}</td>
-                    <td style={{ color: 'var(--text2)', maxWidth: 200 }}>{task.description}</td>
-                    <td>{task.frequency}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{formatDate(task.lastDone)}</td>
-                    <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: task.status === 'Overdue' ? 'var(--red)' : 'inherit', fontWeight: task.status === 'Overdue' ? 600 : 400 }}>
-                      {formatDate(task.nextDue)}
-                    </td>
-                    <td>{task.assignedName || task.assignedTo || '—'}</td>
-                    <td>{task.priority ? <Badge type={priorityBadge(task.priority)}>{task.priority}</Badge> : '—'}</td>
-                    <td><Badge type={statusBadge(task.status)}>{task.status}</Badge></td>
-                    <td>
-                      <div className="table-actions">
-                        {isAdmin && task.status !== 'Completed' && (
-                          <button className="btn btn-complete btn-sm" onClick={() => handleMarkDone(task)} title="Mark as done">
-                            <CheckIcon size={13} /> Done
-                          </button>
-                        )}
-                        {isAdmin && (
-                          <>
-                            <button className="btn btn-edit btn-sm" onClick={() => openEdit(task)}>
-                              <EditIcon size={13} />
-                            </button>
-                            <button className="btn btn-danger btn-sm" onClick={() => setDeleteConfirm(task)}>
-                              <TrashIcon size={13} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Task ID</th>
+                    <th>Equipment</th>
+                    <th>Description</th>
+                    <th>Frequency</th>
+                    <th>Last Done</th>
+                    <th>Next Due</th>
+                    <th>Assigned To</th>
+                    <th>Priority</th>
+                    <th>Status</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {tasks.map(task => (
+                    <tr key={task.id} className={task.status === 'Overdue' ? 'row-overdue' : ''}>
+                      <td className="mono">{task.id}</td>
+                      <td style={{ color: 'var(--text)', fontWeight: 500 }}>{task.equipmentName}</td>
+                      <td style={{ color: 'var(--text2)', maxWidth: 200 }}>{task.description}</td>
+                      <td>{task.frequency}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>{formatDate(task.lastDone)}</td>
+                      <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: task.status === 'Overdue' ? 'var(--red)' : 'inherit', fontWeight: task.status === 'Overdue' ? 600 : 400 }}>
+                        {formatDate(task.nextDue)}
+                      </td>
+                      <td>{task.assignedName || task.assignedTo || '—'}</td>
+                      <td>{task.priority ? <Badge type={priorityBadge(task.priority)}>{task.priority}</Badge> : '—'}</td>
+                      <td><Badge type={statusBadge(task.status)}>{task.status}</Badge></td>
+                      <td>
+                        <div className="table-actions">
+                          {isAdmin && task.status !== 'Completed' && (
+                            <button className="btn btn-complete btn-sm" onClick={() => handleMarkDone(task)}>
+                              <CheckIcon size={13} /> Done
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <>
+                              <button className="btn btn-edit btn-sm" onClick={() => openEdit(task)}>
+                                <EditIcon size={13} />
+                              </button>
+                              <button className="btn btn-danger btn-sm" onClick={() => setDeleteConfirm(task)}>
+                                <TrashIcon size={13} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="pagination">
+                <button className="btn btn-ghost btn-sm" disabled={page <= 1} onClick={() => fetchTasks(page - 1)}>← Prev</button>
+                <span className="pagination-info">Page {page} of {totalPages}</span>
+                <button className="btn btn-ghost btn-sm" disabled={page >= totalPages} onClick={() => fetchTasks(page + 1)}>Next →</button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
-      {/* Add/Edit Modal */}
       <Modal isOpen={modalOpen} title={editItem ? `Edit PM Task — ${editItem.id}` : 'Add PM Task'} onClose={() => setModalOpen(false)}>
         <form onSubmit={handleSave}>
           <div className="modal-body">
             <div className="form-grid">
-              <div className="form-group">
-                <label>Equipment *</label>
-                <select name="equipmentId" value={form.equipmentId} onChange={handleFormChange} required>
-                  <option value="">Select Equipment</option>
-                  {equipment.map(e => <option key={e.id} value={e.id}>{e.id} — {e.name}</option>)}
-                </select>
+              <div className="form-group full-width">
+                <label>Equipment ID *</label>
+                <input name="equipmentId" value={form.equipmentId} onChange={handleFormChange} placeholder="Asset Code" required />
               </div>
               <div className="form-group">
                 <label>Frequency *</label>
@@ -260,8 +265,8 @@ export default function Schedule() {
                 <input type="date" name="lastDone" value={form.lastDone} onChange={handleFormChange} />
               </div>
               <div className="form-group">
-                <label>Next Due *</label>
-                <input type="date" name="nextDue" value={form.nextDue} onChange={handleFormChange} required />
+                <label>Next Due</label>
+                <input type="date" name="nextDue" value={form.nextDue} onChange={handleFormChange} />
               </div>
               <div className="form-group">
                 <label>Assigned To</label>
@@ -273,6 +278,7 @@ export default function Schedule() {
               <div className="form-group">
                 <label>Priority</label>
                 <select name="priority" value={form.priority} onChange={handleFormChange}>
+                  <option value="">None</option>
                   {priorities.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
@@ -291,12 +297,10 @@ export default function Schedule() {
         </form>
       </Modal>
 
-      {/* Delete Confirm */}
       <Modal isOpen={!!deleteConfirm} title="Confirm Delete" onClose={() => setDeleteConfirm(null)}>
         <div className="modal-body">
           <p style={{ color: 'var(--text2)' }}>
-            Delete PM task <strong style={{ color: 'var(--text)' }}>{deleteConfirm?.id}</strong>: "{deleteConfirm?.description}"?
-            This cannot be undone.
+            Delete PM task <strong style={{ color: 'var(--text)' }}>{deleteConfirm?.id}</strong>: "{deleteConfirm?.description}"? This cannot be undone.
           </p>
         </div>
         <div className="modal-footer">

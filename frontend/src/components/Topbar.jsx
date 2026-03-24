@@ -27,8 +27,8 @@ let allData = null;
 async function loadAllData() {
   if (allData) return allData;
   const [eq, sc, wo, tech] = await Promise.all([
-    client.get('/equipment').then(r => r.data).catch(() => []),
-    client.get('/schedule').then(r => r.data).catch(() => []),
+    client.get('/equipment', { params: { page: 1, limit: 1000 } }).then(r => r.data.data).catch(() => []),
+    client.get('/schedule', { params: { page: 1, limit: 1000 } }).then(r => r.data.data).catch(() => []),
     client.get('/workorders').then(r => r.data).catch(() => []),
     client.get('/technicians').then(r => r.data).catch(() => []),
   ]);
